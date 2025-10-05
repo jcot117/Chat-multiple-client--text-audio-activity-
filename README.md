@@ -1,5 +1,5 @@
 # Chat-multiple-client--text-audio-activity-
-# Bienestar Universitario
+# ChatMe
 ## Commit suggested structure
 
 ### Format
