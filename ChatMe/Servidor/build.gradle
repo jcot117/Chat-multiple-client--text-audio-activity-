@@ -1,0 +1,13 @@
+// PeerA/build.gradle 
+
+application {
+    mainClass = "server.Server"
+}
+
+jar {
+    manifest {
+	attributes 'Main-Class': 'server.Server'
+    }
+    archiveBaseName = 'Servidor'
+}
+

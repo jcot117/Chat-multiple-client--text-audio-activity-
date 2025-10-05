@@ -1,0 +1,13 @@
+// PeerA/build.gradle 
+
+application {
+    mainClass = "client.Client"
+}
+
+jar {
+    manifest {
+	attributes 'Main-Class': 'client.Client'
+    }
+    archiveBaseName = 'Usuario'
+}
+
