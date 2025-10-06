@@ -9,12 +9,14 @@ public class Server {
     private int puerto;
     private ServerSocket serverSocket;
     private ExecutorService pool;
-    private Map<String, ClienteHandler> clientesConectados; 
+    private Map<String, ClienteHandler> clientesConectados;
+    private Map<String, Set<String>> grupos; // NUEVO: grupos de chat
     private File historialMensajes;
 
     public Server(int puerto) {
         this.puerto = puerto;
         this.clientesConectados = new ConcurrentHashMap<>();
+        this.grupos = new ConcurrentHashMap<>();
         this.pool = Executors.newCachedThreadPool();
         this.historialMensajes = new File("historial_chat.txt");
     }
@@ -34,7 +36,7 @@ public class Server {
         }
     }
 
-    // Envía un mensaje a un cliente específico si está conectado
+    // Enviar a cliente específico
     private void enviarMensaje(String destino, String mensaje) {
         ClienteHandler clienteDestino = clientesConectados.get(destino);
         if (clienteDestino != null) {
@@ -44,7 +46,25 @@ public class Server {
         }
     }
 
-    // Guarda el mensaje en un archivo de texto
+    // NUEVO: enviar a todos los miembros de un grupo
+    private void enviarAGrupo(String grupo, String mensaje, String remitente) {
+        Set<String> miembros = grupos.get(grupo);
+        if (miembros == null) {
+            System.out.println("El grupo no existe: " + grupo);
+            return;
+        }
+
+        for (String miembro : miembros) {
+            if (!miembro.equals(remitente)) { // no se reenvía a sí mismo
+                ClienteHandler destino = clientesConectados.get(miembro);
+                if (destino != null) {
+                    destino.enviar("[Grupo " + grupo + "] " + remitente + ": " + mensaje);
+                }
+            }
+        }
+    }
+
+    // Guardar historial
     private synchronized void guardarHistorial(String registro) {
         try (FileWriter fw = new FileWriter(historialMensajes, true)) {
             fw.write(registro + "\n");
@@ -53,7 +73,7 @@ public class Server {
         }
     }
 
-    // Clase interna para manejar a cada cliente
+    // Clase interna para cada cliente
     private class ClienteHandler implements Runnable {
         private Socket socket;
         private BufferedReader entrada;
@@ -72,7 +92,7 @@ public class Server {
                 entrada = new BufferedReader(new InputStreamReader(socket.getInputStream()));
                 salida = new PrintWriter(socket.getOutputStream(), true);
 
-                // Primer mensaje: el nombre del usuario
+                // Primer mensaje = nombre
                 nombreUsuario = entrada.readLine();
                 clientesConectados.put(nombreUsuario, this);
                 System.out.println("Usuario conectado: " + nombreUsuario + " (" + direccionIP + ")");
@@ -81,7 +101,13 @@ public class Server {
                 while ((linea = entrada.readLine()) != null) {
                     if (linea.equalsIgnoreCase("exit")) break;
 
-                    // Formato: DESTINO_IP|MENSAJE
+                    // 🔹 Comandos de grupo
+                    if (linea.startsWith("@grupo|")) {
+                        manejarComandoGrupo(linea);
+                        continue;
+                    }
+
+                    // 🔹 Mensaje privado normal
                     String[] partes = linea.split("\\|", 2);
                     if (partes.length < 2) continue;
 
@@ -89,10 +115,9 @@ public class Server {
                     String mensaje = partes[1];
                     String registro = "[" + nombreUsuario + " -> " + destino + "] " + mensaje;
 
-                    System.out.println("" + registro);
+                    System.out.println(registro);
                     guardarHistorial(registro);
 
-                    // Reenviar al destinatario (si está conectado por nombre)
                     enviarMensaje(destino, "De " + nombreUsuario + ": " + mensaje);
                 }
 
@@ -100,6 +125,45 @@ public class Server {
                 System.err.println("Error con el cliente " + nombreUsuario + ": " + e.getMessage());
             } finally {
                 cerrarConexion();
+            }
+        }
+
+        // 🔹 Manejador de comandos de grupo
+        private void manejarComandoGrupo(String comando) {
+            String[] partes = comando.split("\\|");
+            if (partes.length < 3) return;
+
+            String accion = partes[1];
+            String nombreGrupo = partes[2];
+
+            switch (accion.toLowerCase()) {
+                case "crear" -> {
+                    grupos.putIfAbsent(nombreGrupo, ConcurrentHashMap.newKeySet());
+                    grupos.get(nombreGrupo).add(nombreUsuario);
+                    salida.println("Grupo '" + nombreGrupo + "' creado y unido correctamente.");
+                }
+                case "unir" -> {
+                    grupos.putIfAbsent(nombreGrupo, ConcurrentHashMap.newKeySet());
+                    grupos.get(nombreGrupo).add(nombreUsuario);
+                    salida.println("Te uniste al grupo '" + nombreGrupo + "'.");
+                }
+                case "salir" -> {
+                    Set<String> miembros = grupos.get(nombreGrupo);
+                    if (miembros != null) {
+                        miembros.remove(nombreUsuario);
+                        salida.println("Saliste del grupo '" + nombreGrupo + "'.");
+                    }
+                }
+                case "enviar" -> {
+                    if (partes.length < 4) {
+                        salida.println("Formato inválido. Usa: @grupo|enviar|nombreGrupo|mensaje");
+                        return;
+                    }
+                    String mensaje = comando.split("\\|", 4)[3];
+                    enviarAGrupo(nombreGrupo, mensaje, nombreUsuario);
+                    guardarHistorial("[Grupo " + nombreGrupo + "] " + nombreUsuario + ": " + mensaje);
+                }
+                default -> salida.println("Comando de grupo no reconocido.");
             }
         }
 
@@ -111,6 +175,7 @@ public class Server {
             try {
                 if (nombreUsuario != null) {
                     clientesConectados.remove(nombreUsuario);
+                    grupos.values().forEach(g -> g.remove(nombreUsuario));
                     System.out.println("Usuario desconectado: " + nombreUsuario);
                 }
                 socket.close();
@@ -120,7 +185,7 @@ public class Server {
         }
     }
 
-    // Método principal
+    // Main
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
         System.out.print("Puerto del servidor: ");
