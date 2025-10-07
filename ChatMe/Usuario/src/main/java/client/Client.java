@@ -37,15 +37,16 @@ public class Client {
         }
     }
 
-    // Menú interactivo en consola
+    // Menú principal
     private void menuPrincipal() {
         Scanner sc = new Scanner(System.in);
         while (true) {
             System.out.println("\n=== Menú de Chat ===");
-            System.out.println("1. Enviar mensaje");
+            System.out.println("1. Enviar mensaje privado");
             System.out.println("2. Ver contactos");
             System.out.println("3. Agregar contacto");
-            System.out.println("4. Salir");
+            System.out.println("4. Grupos");
+            System.out.println("5. Salir");
             System.out.print("Opción: ");
             int opcion = Integer.parseInt(sc.nextLine());
 
@@ -53,20 +54,70 @@ public class Client {
                 case 1 -> enviarMensaje(sc);
                 case 2 -> verContactos();
                 case 3 -> agregarContacto(sc);
-                case 4 -> cerrarConexion();
+                case 4 -> menuGrupos(sc);
+                case 5 -> cerrarConexion();
                 default -> System.out.println("Opción inválida.");
             }
         }
     }
 
-    // Agregar un contacto a la lista local
+    // Submenú de grupos
+    private void menuGrupos(Scanner sc) {
+        while (true) {
+            System.out.println("\n=== Gestión de Grupos ===");
+            System.out.println("1. Crear grupo");
+            System.out.println("2. Unirse a grupo");
+            System.out.println("3. Enviar mensaje a grupo");
+            System.out.println("4. Salir de grupo");
+            System.out.println("5. Volver al menú principal");
+            System.out.print("Opción: ");
+            int opcion = Integer.parseInt(sc.nextLine());
+
+            switch (opcion) {
+                case 1 -> crearGrupo(sc);
+                case 2 -> unirseGrupo(sc);
+                case 3 -> enviarMensajeGrupo(sc);
+                case 4 -> salirGrupo(sc);
+                case 5 -> { return; }
+                default -> System.out.println("Opción inválida.");
+            }
+        }
+    }
+
+    private void crearGrupo(Scanner sc) {
+        System.out.print("Nombre del grupo a crear: ");
+        String grupo = sc.nextLine();
+        salida.println("@grupo|crear|" + grupo);
+    }
+
+    private void unirseGrupo(Scanner sc) {
+        System.out.print("Nombre del grupo al que deseas unirte: ");
+        String grupo = sc.nextLine();
+        salida.println("@grupo|unir|" + grupo);
+    }
+
+    private void enviarMensajeGrupo(Scanner sc) {
+        System.out.print("Nombre del grupo: ");
+        String grupo = sc.nextLine();
+        System.out.print("Mensaje: ");
+        String mensaje = sc.nextLine();
+        salida.println("@grupo|enviar|" + grupo + "|" + mensaje);
+    }
+
+    private void salirGrupo(Scanner sc) {
+        System.out.print("Nombre del grupo del que deseas salir: ");
+        String grupo = sc.nextLine();
+        salida.println("@grupo|salir|" + grupo);
+    }
+
+    // Contactos
     private void agregarContacto(Scanner sc) {
         System.out.print("Nombre del contacto: ");
         String nombre = sc.nextLine();
         System.out.print("Dirección IP del contacto: ");
         String ip = sc.nextLine();
         contactos.put(nombre, ip);
-        System.out.println("Contacto agregado correctamente ");
+        System.out.println("Contacto agregado correctamente.");
     }
 
     private void verContactos() {
@@ -74,10 +125,11 @@ public class Client {
         if (contactos.isEmpty()) {
             System.out.println("(No hay contactos aún)");
         } else {
-            contactos.forEach((nombre, ip) -> System.out.println(nombre + " -> " + ip)); //Generado por ChatGPT
+            contactos.forEach((nombre, ip) -> System.out.println(nombre + " -> " + ip));
         }
     }
 
+    // Enviar mensaje privado
     private void enviarMensaje(Scanner sc) {
         System.out.print("¿A quién deseas enviar el mensaje? (nombre o IP): ");
         String destino = sc.nextLine();
@@ -92,6 +144,7 @@ public class Client {
         salida.println(ipDestino + "|" + mensaje);
     }
 
+    // Cerrar conexión
     private void cerrarConexion() {
         try {
             salida.println("exit");
@@ -103,14 +156,14 @@ public class Client {
         }
     }
 
-    // Hilo que escucha mensajes entrantes del servidor
+    // Hilo receptor
     private class Receptor implements Runnable {
         @Override
         public void run() {
             try {
                 String mensaje;
                 while ((mensaje = entrada.readLine()) != null) {
-                    System.out.println("\nNuevo mensaje: " + mensaje);
+                    System.out.println("\n" + mensaje);
                 }
             } catch (IOException e) {
                 System.err.println("Conexión terminada: " + e.getMessage());
@@ -118,7 +171,7 @@ public class Client {
         }
     }
 
-    //Main
+    // Main
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
         System.out.print("Tu nombre de usuario: ");
