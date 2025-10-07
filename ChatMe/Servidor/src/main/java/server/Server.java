@@ -46,6 +46,16 @@ public class Server {
         }
     }
 
+    // Enviar datos de audio a cliente específico
+    private void enviarAudio(String destino, byte[] audioData, String metadata) {
+        ClienteHandler clienteDestino = clientesConectados.get(destino);
+        if (clienteDestino != null) {
+            clienteDestino.enviarAudio(destino, audioData, metadata);
+        } else {
+            System.out.println("No se encontró el destino para audio: " + destino);
+        }
+    }
+
     // NUEVO: enviar a todos los miembros de un grupo
     private void enviarAGrupo(String grupo, String mensaje, String remitente) {
         Set<String> miembros = grupos.get(grupo);
@@ -59,6 +69,24 @@ public class Server {
                 ClienteHandler destino = clientesConectados.get(miembro);
                 if (destino != null) {
                     destino.enviar("[Grupo " + grupo + "] " + remitente + ": " + mensaje);
+                }
+            }
+        }
+    }
+
+    // Enviar audio a todos los miembros de un grupo
+    private void enviarAudioAGrupo(String grupo, byte[] audioData, String remitente) {
+        Set<String> miembros = grupos.get(grupo);
+        if (miembros == null) {
+            System.out.println("El grupo no existe: " + grupo);
+            return;
+        }
+
+        for (String miembro : miembros) {
+            if (!miembro.equals(remitente)) {
+                ClienteHandler destino = clientesConectados.get(miembro);
+                if (destino != null) {
+                    destino.enviarAudio(miembro, audioData, "@vozgrupo|" + grupo + "|" + remitente + "|" + audioData.length);
                 }
             }
         }
@@ -80,6 +108,8 @@ public class Server {
         private PrintWriter salida;
         private String nombreUsuario;
         private String direccionIP;
+        private InputStream inputStream;
+        private OutputStream outputStream;
 
         public ClienteHandler(Socket socket) {
             this.socket = socket;
@@ -89,8 +119,10 @@ public class Server {
         @Override
         public void run() {
             try {
-                entrada = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-                salida = new PrintWriter(socket.getOutputStream(), true);
+                inputStream = socket.getInputStream();
+                outputStream = socket.getOutputStream();
+                entrada = new BufferedReader(new InputStreamReader(inputStream));
+                salida = new PrintWriter(outputStream, true);
 
                 // Primer mensaje = nombre
                 nombreUsuario = entrada.readLine();
@@ -183,29 +215,22 @@ public class Server {
             try {
                 String[] partes = metadata.split("\\|");
                 String destino = partes[1];
-                int tamañoAudio = Integer.parseInt(partes[2]);
+                int tamanoAudio = Integer.parseInt(partes[2]);
 
                 // Leer los bytes del audio
-                byte[] audioData = new byte[tamañoAudio];
-                InputStream inputStream = socket.getInputStream();
+                byte[] audioData = new byte[tamanoAudio];
                 int bytesRead = 0;
-                while (bytesRead < tamañoAudio) {
-                    int result = inputStream.read(audioData, bytesRead, tamañoAudio - bytesRead);
+                while (bytesRead < tamanoAudio) {
+                    int result = inputStream.read(audioData, bytesRead, tamanoAudio - bytesRead);
                     if (result == -1) break;
                     bytesRead += result;
                 }
 
                 // Enviar al destino
-                ClienteHandler clienteDestino = clientesConectados.get(destino);
-                if (clienteDestino != null) {
-                    clienteDestino.salida.println("@voz|" + nombreUsuario + "|" + tamañoAudio);
-                    OutputStream outputStreamDestino = clienteDestino.socket.getOutputStream();
-                    outputStreamDestino.write(audioData);
-                    outputStreamDestino.flush();
-                    guardarHistorial("[Voz] " + nombreUsuario + " -> " + destino);
-                } else {
-                    System.out.println("Destino no encontrado para nota de voz: " + destino);
-                }
+                Server.this.enviarAudio(destino, audioData, "@voz|" + nombreUsuario + "|" + audioData.length);
+                guardarHistorial("[Voz] " + nombreUsuario + " -> " + destino);
+                System.out.println("Nota de voz enviada de " + nombreUsuario + " a " + destino);
+        
             } catch (IOException e) {
                 System.err.println("Error al manejar voz privada: " + e.getMessage());
             }
@@ -216,36 +241,21 @@ public class Server {
             try {
                 String[] partes = metadata.split("\\|");
                 String grupo = partes[1];
-                int tamañoAudio = Integer.parseInt(partes[2]);
+                int tamanoAudio = Integer.parseInt(partes[2]);
 
                 // Leer los bytes del audio
-                byte[] audioData = new byte[tamañoAudio];
-                InputStream inputStream = socket.getInputStream();
+                byte[] audioData = new byte[tamanoAudio];
                 int bytesRead = 0;
-                while (bytesRead < tamañoAudio) {
-                    int result = inputStream.read(audioData, bytesRead, tamañoAudio - bytesRead);
+                while (bytesRead < tamanoAudio) {
+                    int result = inputStream.read(audioData, bytesRead, tamanoAudio - bytesRead);
                     if (result == -1) break;
                     bytesRead += result;
                 }
 
                 // Enviar a todos los miembros del grupo
-                Set<String> miembros = grupos.get(grupo);
-                if (miembros != null) {
-                    for (String miembro : miembros) {
-                        if (!miembro.equals(nombreUsuario)) {
-                            ClienteHandler clienteDestino = clientesConectados.get(miembro);
-                            if (clienteDestino != null) {
-                                clienteDestino.salida.println("@vozgrupo|" + grupo + "|" + nombreUsuario + "|" + tamañoAudio);
-                                OutputStream outputStreamDestino = clienteDestino.socket.getOutputStream();
-                                outputStreamDestino.write(audioData);
-                                outputStreamDestino.flush();
-                            }
-                        }
-                    }
-                    guardarHistorial("[Voz-Grupo " + grupo + "] " + nombreUsuario);
-                } else {
-                    System.out.println("Grupo no encontrado: " + grupo);
-                }
+                Server.this.enviarAudioAGrupo(grupo, audioData, nombreUsuario);
+                guardarHistorial("[Voz-Grupo " + grupo + "] " + nombreUsuario);
+                System.out.println("Nota de voz enviada al grupo " + grupo + " por " + nombreUsuario);
             } catch (IOException e) {
                 System.err.println("Error al manejar voz grupal: " + e.getMessage());
             }
@@ -253,6 +263,19 @@ public class Server {
 
         public void enviar(String mensaje) {
             salida.println(mensaje);
+        }
+
+        // 🔹 NUEVO: Método para enviar audio
+        public void enviarAudio(String destino, byte[] audioData, String metadata) {
+            try {
+                // Primero enviar metadata
+                salida.println(metadata);
+                // Luego enviar datos de audio
+                outputStream.write(audioData);
+                outputStream.flush();
+            } catch (IOException e) {
+                System.err.println("Error al enviar audio: " + e.getMessage());
+            }
         }
 
         private void cerrarConexion() {
@@ -271,9 +294,16 @@ public class Server {
 
     // Main
     public static void main(String[] args) {
-        Scanner sc = new Scanner(System.in);
-        System.out.print("Puerto del servidor: ");
-        int puerto = Integer.parseInt(sc.nextLine());
+        int puerto;
+
+        // Si se proporciona argumento, úsalo
+        if (args.length > 0) {
+            puerto = Integer.parseInt(args[0]);
+        } else {
+            // Si no, usa un puerto por defecto
+            puerto = 8080;
+            System.out.println("Usando puerto por defecto: " + puerto);
+        }
 
         Server servidor = new Server(puerto);
         servidor.iniciar();
