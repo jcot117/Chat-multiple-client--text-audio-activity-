@@ -107,6 +107,17 @@ public class Server {
                         continue;
                     }
 
+                    // 🔹 Mensajes de voz
+                    if (linea.startsWith("@voz|")) {
+                        manejarVozPrivada(linea);
+                        continue;
+                    }
+
+                    if (linea.startsWith("@vozgrupo|")) {
+                        manejarVozGrupo(linea);
+                        continue;
+                    }
+
                     // 🔹 Mensaje privado normal
                     String[] partes = linea.split("\\|", 2);
                     if (partes.length < 2) continue;
@@ -164,6 +175,79 @@ public class Server {
                     guardarHistorial("[Grupo " + nombreGrupo + "] " + nombreUsuario + ": " + mensaje);
                 }
                 default -> salida.println("Comando de grupo no reconocido.");
+            }
+        }
+
+        // 🔹 Manejador de voz privada
+        private void manejarVozPrivada(String metadata) {
+            try {
+                String[] partes = metadata.split("\\|");
+                String destino = partes[1];
+                int tamañoAudio = Integer.parseInt(partes[2]);
+
+                // Leer los bytes del audio
+                byte[] audioData = new byte[tamañoAudio];
+                InputStream inputStream = socket.getInputStream();
+                int bytesRead = 0;
+                while (bytesRead < tamañoAudio) {
+                    int result = inputStream.read(audioData, bytesRead, tamañoAudio - bytesRead);
+                    if (result == -1) break;
+                    bytesRead += result;
+                }
+
+                // Enviar al destino
+                ClienteHandler clienteDestino = clientesConectados.get(destino);
+                if (clienteDestino != null) {
+                    clienteDestino.salida.println("@voz|" + nombreUsuario + "|" + tamañoAudio);
+                    OutputStream outputStreamDestino = clienteDestino.socket.getOutputStream();
+                    outputStreamDestino.write(audioData);
+                    outputStreamDestino.flush();
+                    guardarHistorial("[Voz] " + nombreUsuario + " -> " + destino);
+                } else {
+                    System.out.println("Destino no encontrado para nota de voz: " + destino);
+                }
+            } catch (IOException e) {
+                System.err.println("Error al manejar voz privada: " + e.getMessage());
+            }
+        }
+
+        // 🔹 Manejador de voz grupal
+        private void manejarVozGrupo(String metadata) {
+            try {
+                String[] partes = metadata.split("\\|");
+                String grupo = partes[1];
+                int tamañoAudio = Integer.parseInt(partes[2]);
+
+                // Leer los bytes del audio
+                byte[] audioData = new byte[tamañoAudio];
+                InputStream inputStream = socket.getInputStream();
+                int bytesRead = 0;
+                while (bytesRead < tamañoAudio) {
+                    int result = inputStream.read(audioData, bytesRead, tamañoAudio - bytesRead);
+                    if (result == -1) break;
+                    bytesRead += result;
+                }
+
+                // Enviar a todos los miembros del grupo
+                Set<String> miembros = grupos.get(grupo);
+                if (miembros != null) {
+                    for (String miembro : miembros) {
+                        if (!miembro.equals(nombreUsuario)) {
+                            ClienteHandler clienteDestino = clientesConectados.get(miembro);
+                            if (clienteDestino != null) {
+                                clienteDestino.salida.println("@vozgrupo|" + grupo + "|" + nombreUsuario + "|" + tamañoAudio);
+                                OutputStream outputStreamDestino = clienteDestino.socket.getOutputStream();
+                                outputStreamDestino.write(audioData);
+                                outputStreamDestino.flush();
+                            }
+                        }
+                    }
+                    guardarHistorial("[Voz-Grupo " + grupo + "] " + nombreUsuario);
+                } else {
+                    System.out.println("Grupo no encontrado: " + grupo);
+                }
+            } catch (IOException e) {
+                System.err.println("Error al manejar voz grupal: " + e.getMessage());
             }
         }
 
