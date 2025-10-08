@@ -14,7 +14,13 @@
     apply plugin: 'java'
     apply plugin: 'application'
 
+    // 🔹 Agregar encoding UTF-8
+    tasks.withType(JavaCompile) {
+        options.encoding = 'UTF-8'
+    }
+
     repositories {
-	mavenCentral()
+	   mavenCentral()
     }
  }
+

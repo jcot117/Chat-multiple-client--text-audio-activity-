@@ -1,4 +1,6 @@
 // PeerA/build.gradle 
+apply plugin: 'java'
+apply plugin: 'application'
 
 application {
     mainClass = "client.Client"
@@ -10,4 +12,5 @@ jar {
     }
     archiveBaseName = 'Usuario'
 }
+
 
