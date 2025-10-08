@@ -159,7 +159,7 @@ public class Server {
                     String registro = "[" + nombreUsuario + " -> " + destino + "] " + mensaje;
 
                     System.out.println(registro);
-                    guardarHistorial(registro);
+                    //guardarHistorial(registro);
 
                     enviarMensaje(destino, "De " + nombreUsuario + ": " + mensaje);
                 }
@@ -204,7 +204,7 @@ public class Server {
                     }
                     String mensaje = comando.split("\\|", 4)[3];
                     enviarAGrupo(nombreGrupo, mensaje, nombreUsuario);
-                    guardarHistorial("[Grupo " + nombreGrupo + "] " + nombreUsuario + ": " + mensaje);
+                    //guardarHistorial("[Grupo " + nombreGrupo + "] " + nombreUsuario + ": " + mensaje);
                 }
                 default -> salida.println("Comando de grupo no reconocido.");
             }
@@ -228,7 +228,7 @@ public class Server {
 
                 // Enviar al destino
                 Server.this.enviarAudio(destino, audioData, "@voz|" + nombreUsuario + "|" + audioData.length);
-                guardarHistorial("[Voz] " + nombreUsuario + " -> " + destino);
+                //guardarHistorial("[Voz] " + nombreUsuario + " -> " + destino);
                 System.out.println("Nota de voz enviada de " + nombreUsuario + " a " + destino);
         
             } catch (IOException e) {
@@ -254,7 +254,7 @@ public class Server {
 
                 // Enviar a todos los miembros del grupo
                 Server.this.enviarAudioAGrupo(grupo, audioData, nombreUsuario);
-                guardarHistorial("[Voz-Grupo " + grupo + "] " + nombreUsuario);
+                //guardarHistorial("[Voz-Grupo " + grupo + "] " + nombreUsuario);
                 System.out.println("Nota de voz enviada al grupo " + grupo + " por " + nombreUsuario);
             } catch (IOException e) {
                 System.err.println("Error al manejar voz grupal: " + e.getMessage());
