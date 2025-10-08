@@ -259,12 +259,12 @@ public class Client {
     private byte[] grabarAudio(int duracionSegundos) {
         TargetDataLine microphone = null;
         try {
-            AudioFormat format = new AudioFormat(8000.0f, 16, 1, true, false); // little-endian
+            AudioFormat format = new AudioFormat(44100, 16, 1, true, true); // little-endian
             DataLine.Info info = new DataLine.Info(TargetDataLine.class, format);
             
             if (!AudioSystem.isLineSupported(info)) {
                 System.err.println("Línea de audio no soportada. Probando formato alternativo...");
-                format = new AudioFormat(16000.0f, 16, 1, true, false);
+                format = new AudioFormat(16000.0f, 16, 1, true, true);
                 info = new DataLine.Info(TargetDataLine.class, format);
             }
             
@@ -332,7 +332,7 @@ public class Client {
     private void recibirYReproducirAudio(byte[] audioData) {
         try {
             // Usar el mismo formato que en la grabación
-            AudioFormat format = new AudioFormat(8000.0f, 16, 1, true, false); // little-endian
+            AudioFormat format = new AudioFormat(44100, 16, 1, true, true); // little-endian
             
             // Crear un SourceDataLine para mejor control
             DataLine.Info info = new DataLine.Info(SourceDataLine.class, format);
