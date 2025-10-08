@@ -93,13 +93,13 @@ public class Server {
     }
 
     // Guardar historial
-    private synchronized void guardarHistorial(String registro) {
-        try (FileWriter fw = new FileWriter(historialMensajes, true)) {
-            fw.write(registro + "\n");
-        } catch (IOException e) {
-            System.err.println("Error al guardar historial: " + e.getMessage());
-        }
-    }
+//    private synchronized void guardarHistorial(String registro) {
+//        try (FileWriter fw = new FileWriter(historialMensajes, true)) {
+//            fw.write(registro + "\n");
+//        } catch (IOException e) {
+//            System.err.println("Error al guardar historial: " + e.getMessage());
+//        }
+//    }
 
     // Clase interna para cada cliente
     private class ClienteHandler implements Runnable {
