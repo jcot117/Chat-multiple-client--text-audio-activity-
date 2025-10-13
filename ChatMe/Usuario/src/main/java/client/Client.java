@@ -5,6 +5,11 @@ import java.net.*;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Scanner;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+
 import javax.sound.sampled.*;
 
 public class Client {
@@ -15,24 +20,25 @@ public class Client {
     private Map<String, String> contactos;
     private DataInputStream dataInput;
     private OutputStream outputStream;
+    private ExecutorService audioExecutor;
 
     public Client(String nombreUsuario, String direccionServidor, int puerto) {
         this.nombreUsuario = nombreUsuario;
         this.contactos = new HashMap<>();
+        
 
         try {
             socket = new Socket(direccionServidor, puerto);
             entrada = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             salida = new PrintWriter(socket.getOutputStream(), true);
+            new Thread(new Receptor()).start();
             this.dataInput = new DataInputStream(socket.getInputStream());
             this.outputStream = socket.getOutputStream();
+            this.audioExecutor = Executors.newFixedThreadPool(2); // Por ejemplo, 2 hilos para audio
             System.out.println("Conectado al servidor en " + direccionServidor + ":" + puerto);
 
             // Enviar nombre de usuario al servidor
             salida.println(nombreUsuario);
-
-            // Escuchar mensajes entrantes en un hilo aparte
-            new Thread(new Receptor()).start();
 
             // Iniciar la interfaz de linea de comandos
             menuPrincipal();
@@ -51,7 +57,7 @@ public class Client {
             System.out.println("2. Ver contactos");
             System.out.println("3. Agregar contacto");
             System.out.println("4. Grupos");
-            System.out.println("5. Enviar nota de voz");
+            System.out.println("5. Enviar nota de voz privada");
             System.out.println("6. Salir");
             System.out.print("Opcion: ");
             
@@ -69,7 +75,7 @@ public class Client {
                     case 2 -> verContactos();
                     case 3 -> agregarContacto(sc);
                     case 4 -> menuGrupos(sc);
-                    case 5 -> menuVoz(sc);
+                    case 5 -> enviarMensajeVoz(sc, false);
                     case 6 -> { cerrarConexion(); return; }
                     default -> System.out.println("Opcion invalida.");
                 }
@@ -178,43 +184,35 @@ public class Client {
     // Cerrar conexion
     private void cerrarConexion() {
         try {
-            salida.println("exit");
-            socket.close();
+             if (audioExecutor != null) {
+                audioExecutor.shutdown();
+                // Esperar un tiempo para que terminen las tareas en curso
+                if (!audioExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    audioExecutor.shutdownNow();
+                }
+            }
+            //Cerrar sockets y streams
+            if (salida != null) {
+                salida.println("exit");
+            }
+
+            if (socket != null && !socket.isClosed()) {
+                socket.close();
+            }
             System.out.println("Conexion cerrada.");
-            System.exit(0);
+        } catch (InterruptedException e) {
+            if (audioExecutor != null) {
+                audioExecutor.shutdownNow();
+            }
+            Thread.currentThread().interrupt();
         } catch (IOException e) {
             System.err.println("Error al cerrar conexion: " + e.getMessage());
         }
     }
 
-    // Metodos para manejar audio
-    private void menuVoz(Scanner sc) {
-        System.out.println("\n=== Enviar Nota de Voz ===");
-        System.out.println("1. Enviar a un usuario");
-        System.out.println("2. Enviar a un grupo");
-        System.out.print("Opcion: ");
-        
-        try {
-            String input = sc.nextLine().trim();
-            if (input.isEmpty()) {
-                System.out.println("Opcion invalida. Volviendo al menu principal.");
-                return;
-            }
-            
-            int opcion = Integer.parseInt(input);
-            
-            switch (opcion) {
-                case 1 -> enviarMensajeVoz(sc, false);
-                case 2 -> enviarMensajeVoz(sc, true);
-                default -> System.out.println("Opcion invalida.");
-            }
-        } catch (NumberFormatException e) {
-            System.out.println("Error: Por favor ingresa 1 o 2.");
-        }
-    }
-
     private void enviarMensajeVoz(Scanner sc, boolean esGrupo) {
         try {
+            //Obtiene duración y destino
             System.out.print("Duracion de la nota de voz (segundos, maximo 30): ");
             int duracion = Integer.parseInt(sc.nextLine());
             duracion = Math.min(duracion, 30);
@@ -229,13 +227,14 @@ public class Client {
                 destino = contactos.getOrDefault(destino, destino);
             }
 
+            //Graba audio llamando a grabarAudio()
             byte[] audioData = grabarAudio(duracion);
             if (audioData.length == 0) {
                 System.err.println("No se pudo grabar el audio.");
                 return;
             }
 
-            // Enviar metadata primero
+            // Envía metadata primero "@voz|destino|tamaño" o "@vozgrupo|grupo|tamaño"
             if (esGrupo) {
                 salida.println("@vozgrupo|" + destino + "|" + audioData.length);
             } else {
@@ -245,7 +244,7 @@ public class Client {
             // Pequena pausa para sincronizacion
             Thread.sleep(50);
             
-            // Enviar datos de audio
+            // Envía los bytes (datos) de audio por el OutputStream
             outputStream.write(audioData);
             outputStream.flush();
             
@@ -258,8 +257,11 @@ public class Client {
 
     private byte[] grabarAudio(int duracionSegundos) {
         TargetDataLine microphone = null;
+        Future<?> progressFuture = null;
+
         try {
-            AudioFormat format = new AudioFormat(44100, 16, 1, true, true); // little-endian
+            // Configura formato de audio: 44.1kHz, 16-bit, mono, little-endian
+            AudioFormat format = new AudioFormat(44100, 16, 1, true, true);
             DataLine.Info info = new DataLine.Info(TargetDataLine.class, format);
             
             if (!AudioSystem.isLineSupported(info)) {
@@ -268,6 +270,7 @@ public class Client {
                 info = new DataLine.Info(TargetDataLine.class, format);
             }
             
+            // Abre el micrófono y graba durante el tiempo especificado
             microphone = (TargetDataLine) AudioSystem.getLine(info);
             microphone.open(format);
             microphone.start();
@@ -280,27 +283,27 @@ public class Client {
             long startTime = System.currentTimeMillis();
             long endTime = startTime + (duracionSegundos * 1000);
             
-            // Barra de progreso
-            Thread progressThread = new Thread(() -> {
-                try {
-                    int progress = 0;
-                    while (progress < 100) {
-                        long currentTime = System.currentTimeMillis();
-                        progress = (int) ((currentTime - startTime) * 100 / (duracionSegundos * 1000));
-                        progress = Math.min(100, progress);
-                        
-                        int bars = progress / 5;
-                        String bar = "[" + "=".repeat(bars) + " ".repeat(20 - bars) + "]";
-                        System.out.print("\rProgreso: " + bar + " " + progress + "%");
-                        
-                        Thread.sleep(100);
-                    }
-                    System.out.println("\rProgreso: [====================] 100% Listo");
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
+            //Mostrar barra de progreso usando pool de hilos
+            progressFuture = audioExecutor.submit(() -> {
+            try {
+                int progress = 0;
+                while (progress < 100 && !Thread.currentThread().isInterrupted()) {
+                    long currentTime = System.currentTimeMillis();
+                    progress = (int) ((currentTime - startTime) * 100 / (duracionSegundos * 1000));
+                    progress = Math.min(100, progress);
+                    
+                    int bars = progress / 5;
+                    String bar = "[" + "=".repeat(bars) + " ".repeat(20 - bars) + "]";
+                    System.out.print("\rProgreso: " + bar + " " + progress + "%");
+                    
+                    Thread.sleep(100);
                 }
+                System.out.println("\rProgreso: [====================] 100% Listo");
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                System.out.print("\r"); // Limpiar línea
+            }
             });
-            progressThread.start();
             
             while (System.currentTimeMillis() < endTime) {
                 int bytesRead = microphone.read(buffer, 0, Math.min(buffer.length, microphone.available()));
@@ -311,17 +314,19 @@ public class Client {
             
             microphone.stop();
             microphone.close();
-            progressThread.interrupt(); // Interrumpir el hilo de progreso por si acaso
-            
             byte[] audioData = baos.toByteArray();
             System.out.println("Audio grabado: " + audioData.length + " bytes");
             
+            // Retorna bytes del audio grabado
             return audioData;
             
         } catch (Exception e) {
             System.err.println("Error al grabar audio: " + e.getMessage());
             return new byte[0];
         } finally {
+            if (progressFuture != null && !progressFuture.isDone()) {
+                progressFuture.cancel(true);
+            }
             if (microphone != null) {
                 microphone.close();
             }
@@ -404,6 +409,7 @@ public class Client {
         
         private void manejarAudioRecibido(String metadata, boolean esGrupo) {
             try {
+                // Parsea metadata: "@voz|remitente|tamaño" o "@vozgrupo|grupo|remitente|tamaño"
                 String[] partes = metadata.split("\\|");
                 if (partes.length < (esGrupo ? 4 : 3)) {
                     System.err.println("Mensaje de audio mal formado: " + metadata);
@@ -430,22 +436,22 @@ public class Client {
 
                 System.out.println("Audio recibido completamente: " + totalLeido + " bytes");
                 
-                // Reproducir en un hilo separado con un pequeño delay para evitar conflictos
-                new Thread(() -> {
+                // En lugar de crear un nuevo hilo, usamos el executor
+                audioExecutor.execute(() -> {
                     try {
-                        Thread.sleep(100); // Pequeño delay para estabilizar
+                        Thread.sleep(100);
                         System.out.println("Reproduciendo nota de voz...");
                         recibirYReproducirAudio(audioData);
                     } catch (Exception e) {
                         System.err.println("Error en hilo de reproducción: " + e.getMessage());
                     }
-                }).start();
                 
-            } catch (Exception e) {
-                System.err.println("Error al recibir audio: " + e.getMessage());
+                });
+                } catch (Exception e) { // AÑADIR este catch para el try principal
+                    System.err.println("Error al recibir audio: " + e.getMessage());
+                }
             }
-        }
-    }
+        } 
 
     // Main
     public static void main(String[] args) {

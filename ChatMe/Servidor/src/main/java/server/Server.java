@@ -82,10 +82,12 @@ public class Server {
             return;
         }
 
+        // Para cada miembro del grupo (excepto remitente)
         for (String miembro : miembros) {
             if (!miembro.equals(remitente)) {
                 ClienteHandler destino = clientesConectados.get(miembro);
                 if (destino != null) {
+                    // Envía metadata: "@vozgrupo|grupo|remitente|tamaño"
                     destino.enviarAudio(miembro, audioData, "@vozgrupo|" + grupo + "|" + remitente + "|" + audioData.length);
                 }
             }
@@ -212,12 +214,13 @@ public class Server {
 
         // 🔹 Manejador de voz privada
         private void manejarVozPrivada(String metadata) {
+            // Parsea: "@voz|destino|tamaño"
             try {
                 String[] partes = metadata.split("\\|");
                 String destino = partes[1];
                 int tamanoAudio = Integer.parseInt(partes[2]);
 
-                // Leer los bytes del audio
+                // Lee exactamente 'tamaño' bytes del InputStream (del audio)
                 byte[] audioData = new byte[tamanoAudio];
                 int bytesRead = 0;
                 while (bytesRead < tamanoAudio) {
@@ -226,7 +229,7 @@ public class Server {
                     bytesRead += result;
                 }
 
-                // Enviar al destino
+                // Enviar al destino llamando a enviar audio
                 Server.this.enviarAudio(destino, audioData, "@voz|" + nombreUsuario + "|" + audioData.length);
                 //guardarHistorial("[Voz] " + nombreUsuario + " -> " + destino);
                 System.out.println("Nota de voz enviada de " + nombreUsuario + " a " + destino);
@@ -239,11 +242,12 @@ public class Server {
         // 🔹 Manejador de voz grupal
         private void manejarVozGrupo(String metadata) {
             try {
+                // Parsea: "@vozgrupo|grupo|tamaño"
                 String[] partes = metadata.split("\\|");
                 String grupo = partes[1];
                 int tamanoAudio = Integer.parseInt(partes[2]);
 
-                // Leer los bytes del audio
+                // Lee los bytes del audio
                 byte[] audioData = new byte[tamanoAudio];
                 int bytesRead = 0;
                 while (bytesRead < tamanoAudio) {
@@ -268,13 +272,16 @@ public class Server {
         // 🔹 NUEVO: Método para enviar audio
         public void enviarAudio(String destino, byte[] audioData, String metadata) {
             try {
+                System.out.println("Enviando audio a: " + destino); // LOG
+                System.out.println("Tamaño del audio: " + audioData.length + " bytes");
                 // Primero enviar metadata
                 salida.println(metadata);
                 // Luego enviar datos de audio
                 outputStream.write(audioData);
                 outputStream.flush();
+                System.out.println("Audio enviado exitosamente a: " + destino);
             } catch (IOException e) {
-                System.err.println("Error al enviar audio: " + e.getMessage());
+                System.err.println("Error al enviar audio a " + destino + ": "  + e.getMessage());
             }
         }
 
