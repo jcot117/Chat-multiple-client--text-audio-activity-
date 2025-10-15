@@ -15,6 +15,10 @@ public class Client {
     private Map<String, String> contactos;
     private DataInputStream dataInput;
     private OutputStream outputStream;
+    private boolean enLlamada = false;
+    private ServerSocket servidorLlamada;
+    private Socket socketLlamada;
+    private Thread hiloLlamadaEntrante;
 
     public Client(String nombreUsuario, String direccionServidor, int puerto) {
         this.nombreUsuario = nombreUsuario;
@@ -27,9 +31,12 @@ public class Client {
             this.dataInput = new DataInputStream(socket.getInputStream());
             this.outputStream = socket.getOutputStream();
             System.out.println("Conectado al servidor en " + direccionServidor + ":" + puerto);
-
-            // Enviar nombre de usuario al servidor
             salida.println(nombreUsuario);
+            // Iniciar servidor para llamadas entrantes
+            iniciarServidorLlamadas();
+            System.out.println(nombreUsuario);
+            // Enviar nombre de usuario al servidor
+            
 
             // Escuchar mensajes entrantes en un hilo aparte
             new Thread(new Receptor()).start();
@@ -42,7 +49,49 @@ public class Client {
         }
     }
 
-    // Menu principal
+    // Iniciar servidor para recibir llamadas
+    private void iniciarServidorLlamadas() {
+        try {
+            servidorLlamada = new ServerSocket(0); // Puerto automático
+            int puertoLlamada = servidorLlamada.getLocalPort();
+            
+            // Enviar información de llamada al servidor
+            salida.println("@config|puerto_llamada|" + puertoLlamada);
+            
+            hiloLlamadaEntrante = new Thread(() -> {
+                while (!servidorLlamada.isClosed()) {
+                    try {
+                        Socket llamadaSocket = servidorLlamada.accept();
+                        manejarLlamadaEntrante(llamadaSocket);
+                    } catch (IOException e) {
+                        if (!servidorLlamada.isClosed()) {
+                            System.err.println("Error en servidor de llamadas: " + e.getMessage());
+                        }
+                    }
+                }
+            });
+            hiloLlamadaEntrante.start();
+            
+        } catch (IOException e) {
+            System.err.println("Error al iniciar servidor de llamadas: " + e.getMessage());
+        }
+    }
+
+    // Manejar llamada entrante
+    private void manejarLlamadaEntrante(Socket socketLlamada) {
+        this.socketLlamada = socketLlamada;
+        System.out.println("\nLlamada entrante conectada desde " + socketLlamada.getInetAddress());
+        
+        new Thread(() -> {
+            try {
+                iniciarRecepcionAudio(socketLlamada);
+            } catch (Exception e) {
+                System.err.println("Error en llamada entrante: " + e.getMessage());
+            }
+        }).start();
+    }
+
+    // Menu principal actualizado
     private void menuPrincipal() {
         Scanner sc = new Scanner(System.in);
         while (true) {
@@ -52,7 +101,8 @@ public class Client {
             System.out.println("3. Agregar contacto");
             System.out.println("4. Grupos");
             System.out.println("5. Enviar nota de voz");
-            System.out.println("6. Salir");
+            System.out.println("6. Llamadas de voz");
+            System.out.println("7. Salir");
             System.out.print("Opcion: ");
             
             try {
@@ -70,16 +120,169 @@ public class Client {
                     case 3 -> agregarContacto(sc);
                     case 4 -> menuGrupos(sc);
                     case 5 -> menuVoz(sc);
-                    case 6 -> { cerrarConexion(); return; }
+                    case 6 -> menuLlamadas(sc);
+                    case 7 -> { cerrarConexion(); return; }
                     default -> System.out.println("Opcion invalida.");
                 }
             } catch (NumberFormatException e) {
-                System.out.println("Error: Por favor ingresa un numero valido (1-6).");
+                System.out.println("Error: Por favor ingresa un numero valido (1-7).");
             }
         }
     }
 
-    // Submenu de grupos
+    // Nuevo menú de llamadas
+    private void menuLlamadas(Scanner sc) {
+        while (true) {
+            System.out.println("\n=== Llamadas de Voz ===");
+            System.out.println("1. Llamar a usuario");
+            System.out.println("2. Colgar llamada actual");
+            System.out.println("3. Volver al menu principal");
+            System.out.print("Opcion: ");
+            
+            try {
+                String input = sc.nextLine().trim();
+                if (input.isEmpty()) {
+                    System.out.println("Por favor, ingresa un numero de opcion.");
+                    continue;
+                }
+                
+                int opcion = Integer.parseInt(input);
+
+                switch (opcion) {
+                    case 1 -> iniciarLlamada(sc);
+                    case 2 -> colgarLlamada();
+                    case 3 -> { return; }
+                    default -> System.out.println("Opcion invalida.");
+                }
+            } catch (NumberFormatException e) {
+                System.out.println("Error: Por favor ingresa un numero valido (1-3).");
+            }
+        }
+    }
+
+    // Iniciar llamada a otro usuario
+    private void iniciarLlamada(Scanner sc) {
+        if (enLlamada) {
+            System.out.println("Ya estas en una llamada. Cuelga primero.");
+            return;
+        }
+
+        System.out.print("Usuario a llamar: ");
+        String destino = sc.nextLine();
+
+        // Solicitar información de llamada al servidor
+        salida.println("@llamada|solicitar|" + destino);
+        System.out.println("Solicitando llamada a " + destino + "...");
+    }
+
+    // Colgar llamada actual
+    private void colgarLlamada() {
+        if (!enLlamada) {
+            System.out.println("No hay llamada activa.");
+            return;
+        }
+
+        try {
+            if (socketLlamada != null && !socketLlamada.isClosed()) {
+                socketLlamada.close();
+            }
+            enLlamada = false;
+            System.out.println("Llamada terminada.");
+        } catch (IOException e) {
+            System.err.println("Error al colgar llamada: " + e.getMessage());
+        }
+    }
+
+    // Conectar llamada saliente
+    private void conectarLlamada(String ipDestino, int puertoDestino) {
+        try {
+            socketLlamada = new Socket(ipDestino, puertoDestino);
+            enLlamada = true;
+            
+            System.out.println("Conectado para llamada con " + ipDestino);
+            
+            // Iniciar transmisión y recepción en hilos separados
+            new Thread(() -> iniciarTransmisionAudio(socketLlamada)).start();
+            new Thread(() -> iniciarRecepcionAudio(socketLlamada)).start();
+            
+        } catch (IOException e) {
+            System.err.println("Error al conectar llamada: " + e.getMessage());
+        }
+    }
+
+    // Iniciar transmisión de audio
+    private void iniciarTransmisionAudio(Socket socket) {
+        try {
+            AudioFormat format = new AudioFormat(44100, 16, 1, true, true);
+            DataLine.Info infoMicrophone = new DataLine.Info(TargetDataLine.class, format);
+            TargetDataLine microphone = (TargetDataLine) AudioSystem.getLine(infoMicrophone);
+
+            microphone.open(format);
+            microphone.start();
+
+            OutputStream os = socket.getOutputStream();
+            BufferedOutputStream bos = new BufferedOutputStream(os);
+
+            byte[] buffer = new byte[4096];
+            System.out.println("Transmitiendo audio... (Presiona Enter en el menu para colgar)");
+
+            while (enLlamada && !socket.isClosed()) {
+                int bytesRead = microphone.read(buffer, 0, buffer.length);
+                if (bytesRead > 0) {
+                    bos.write(buffer, 0, bytesRead);
+                    bos.flush();
+                }
+            }
+
+            microphone.stop();
+            microphone.close();
+            bos.close();
+            
+        } catch (Exception e) {
+            if (enLlamada) { // Solo mostrar error si todavía está en llamada
+                System.err.println("Error en transmisión de audio: " + e.getMessage());
+            }
+        }
+    }
+
+    // Iniciar recepción de audio
+    private void iniciarRecepcionAudio(Socket socket) {
+        try {
+            AudioFormat format = new AudioFormat(44100, 16, 1, true, true);
+            DataLine.Info infoSpeaker = new DataLine.Info(SourceDataLine.class, format);
+            SourceDataLine speaker = (SourceDataLine) AudioSystem.getLine(infoSpeaker);
+
+            speaker.open(format);
+            speaker.start();
+
+            InputStream is = socket.getInputStream();
+            BufferedInputStream bis = new BufferedInputStream(is);
+
+            byte[] buffer = new byte[4096];
+            System.out.println("Escuchando audio...");
+
+            while (enLlamada && !socket.isClosed()) {
+                int bytesRead = bis.read(buffer, 0, buffer.length);
+                if (bytesRead == -1) break;
+                speaker.write(buffer, 0, bytesRead);
+            }
+
+            speaker.drain();
+            speaker.close();
+            bis.close();
+            
+            // Limpiar estado cuando termina la llamada
+            enLlamada = false;
+            System.out.println("Llamada terminada.");
+            
+        } catch (Exception e) {
+            if (enLlamada) { // Solo mostrar error si todavía está en llamada
+                System.err.println("Error en recepción de audio: " + e.getMessage());
+            }
+        }
+    }
+
+    // Resto de métodos existentes (sin cambios)
     private void menuGrupos(Scanner sc) {
         while (true) {
             System.out.println("\n=== Gestion de Grupos ===");
@@ -141,7 +344,6 @@ public class Client {
         salida.println("@grupo|salir|" + grupo);
     }
 
-    // Contactos
     private void agregarContacto(Scanner sc) {
         System.out.print("Nombre del contacto: ");
         String nombre = sc.nextLine();
@@ -160,34 +362,16 @@ public class Client {
         }
     }
 
-    // Enviar mensaje privado
     private void enviarMensaje(Scanner sc) {
-        System.out.print("A quien deseas enviar el mensaje? (nombre o IP): ");
+        System.out.print("A quien deseas enviar el mensaje? (nombre de usuario): ");
         String destino = sc.nextLine();
-
-        // Buscar IP si el usuario escribio un nombre
-        String ipDestino = contactos.getOrDefault(destino, destino);
 
         System.out.print("Mensaje: ");
         String mensaje = sc.nextLine();
 
-        // Formato: DESTINO_IP|MENSAJE
-        salida.println(ipDestino + "|" + mensaje);
+        salida.println(destino + "|" + mensaje);
     }
 
-    // Cerrar conexion
-    private void cerrarConexion() {
-        try {
-            salida.println("exit");
-            socket.close();
-            System.out.println("Conexion cerrada.");
-            System.exit(0);
-        } catch (IOException e) {
-            System.err.println("Error al cerrar conexion: " + e.getMessage());
-        }
-    }
-
-    // Metodos para manejar audio
     private void menuVoz(Scanner sc) {
         System.out.println("\n=== Enviar Nota de Voz ===");
         System.out.println("1. Enviar a un usuario");
@@ -224,9 +408,8 @@ public class Client {
                 System.out.print("Nombre del grupo: ");
                 destino = sc.nextLine();
             } else {
-                System.out.print("A quien deseas enviar la nota de voz? (nombre o IP): ");
+                System.out.print("A quien deseas enviar la nota de voz? (nombre de usuario): ");
                 destino = sc.nextLine();
-                destino = contactos.getOrDefault(destino, destino);
             }
 
             byte[] audioData = grabarAudio(duracion);
@@ -235,17 +418,14 @@ public class Client {
                 return;
             }
 
-            // Enviar metadata primero
             if (esGrupo) {
                 salida.println("@vozgrupo|" + destino + "|" + audioData.length);
             } else {
                 salida.println("@voz|" + destino + "|" + audioData.length);
             }
             
-            // Pequena pausa para sincronizacion
             Thread.sleep(50);
             
-            // Enviar datos de audio
             outputStream.write(audioData);
             outputStream.flush();
             
@@ -259,11 +439,10 @@ public class Client {
     private byte[] grabarAudio(int duracionSegundos) {
         TargetDataLine microphone = null;
         try {
-            AudioFormat format = new AudioFormat(8000.0f, 16, 1, true, false); // little-endian
+            AudioFormat format = new AudioFormat(8000.0f, 16, 1, true, false);
             DataLine.Info info = new DataLine.Info(TargetDataLine.class, format);
             
             if (!AudioSystem.isLineSupported(info)) {
-                System.err.println("Línea de audio no soportada. Probando formato alternativo...");
                 format = new AudioFormat(16000.0f, 16, 1, true, false);
                 info = new DataLine.Info(TargetDataLine.class, format);
             }
@@ -280,7 +459,6 @@ public class Client {
             long startTime = System.currentTimeMillis();
             long endTime = startTime + (duracionSegundos * 1000);
             
-            // Barra de progreso
             Thread progressThread = new Thread(() -> {
                 try {
                     int progress = 0;
@@ -311,7 +489,7 @@ public class Client {
             
             microphone.stop();
             microphone.close();
-            progressThread.interrupt(); // Interrumpir el hilo de progreso por si acaso
+            progressThread.interrupt();
             
             byte[] audioData = baos.toByteArray();
             System.out.println("Audio grabado: " + audioData.length + " bytes");
@@ -328,19 +506,15 @@ public class Client {
         }
     }
 
-    // Método mejorado para reproducir audio
     private void recibirYReproducirAudio(byte[] audioData) {
         try {
-            // Usar el mismo formato que en la grabación
-            AudioFormat format = new AudioFormat(8000.0f, 16, 1, true, false); // little-endian
+            AudioFormat format = new AudioFormat(8000.0f, 16, 1, true, false);
             
-            // Crear un SourceDataLine para mejor control
             DataLine.Info info = new DataLine.Info(SourceDataLine.class, format);
             SourceDataLine line = (SourceDataLine) AudioSystem.getLine(info);
             line.open(format);
             line.start();
             
-            // Reproducir los datos
             int bufferSize = 4096;
             int offset = 0;
             
@@ -351,7 +525,6 @@ public class Client {
                 offset += chunkSize;
             }
             
-            // Esperar a que termine la reproducción
             line.drain();
             line.close();
             
@@ -359,9 +532,7 @@ public class Client {
             
         } catch (Exception e) {
             System.err.println("Error al reproducir el audio: " + e.getMessage());
-            e.printStackTrace();
             
-            // Fallback: intentar con un formato más básico
             try {
                 AudioInputStream ais = AudioSystem.getAudioInputStream(
                     new ByteArrayInputStream(audioData));
@@ -369,7 +540,6 @@ public class Client {
                 clip.open(ais);
                 clip.start();
                 
-                // Esperar a que termine
                 while (clip.isRunning()) {
                     Thread.sleep(100);
                 }
@@ -382,7 +552,24 @@ public class Client {
         }
     }
 
-    // Hilo receptor mejorado
+    private void cerrarConexion() {
+        try {
+            enLlamada = false;
+            if (servidorLlamada != null) {
+                servidorLlamada.close();
+            }
+            if (socketLlamada != null) {
+                socketLlamada.close();
+            }
+            salida.println("exit");
+            socket.close();
+            System.out.println("Conexion cerrada.");
+            System.exit(0);
+        } catch (IOException e) {
+            System.err.println("Error al cerrar conexion: " + e.getMessage());
+        }
+    }
+
     private class Receptor implements Runnable {
         @Override
         public void run() {
@@ -393,6 +580,8 @@ public class Client {
                         manejarAudioRecibido(mensaje, false);
                     } else if (mensaje.startsWith("@vozgrupo|")) {
                         manejarAudioRecibido(mensaje, true);
+                    } else if (mensaje.startsWith("@llamada|")) {
+                        manejarComandoLlamada(mensaje);
                     } else {
                         System.out.println("\n" + mensaje);
                     }
@@ -416,7 +605,6 @@ public class Client {
                 String contexto = esGrupo ? "en grupo " + grupo + " de " : "de ";
                 System.out.println("\nRecibiendo nota de voz " + contexto + remitente + "...");
 
-                // Leer datos de audio de manera robusta
                 byte[] audioData = new byte[tamanoAudio];
                 int totalLeido = 0;
                 
@@ -430,10 +618,9 @@ public class Client {
 
                 System.out.println("Audio recibido completamente: " + totalLeido + " bytes");
                 
-                // Reproducir en un hilo separado con un pequeño delay para evitar conflictos
                 new Thread(() -> {
                     try {
-                        Thread.sleep(100); // Pequeño delay para estabilizar
+                        Thread.sleep(100);
                         System.out.println("Reproduciendo nota de voz...");
                         recibirYReproducirAudio(audioData);
                     } catch (Exception e) {
@@ -445,6 +632,52 @@ public class Client {
                 System.err.println("Error al recibir audio: " + e.getMessage());
             }
         }
+        
+        private void manejarComandoLlamada(String comando) {
+            String[] partes = comando.split("\\|");
+            if (partes.length < 3) return;
+            
+            String accion = partes[1];
+            String parametro = partes[2];
+            
+            switch (accion) {
+                case "solicitud" -> {
+                    System.out.println("\nLlamada entrante de: " + parametro);
+                    System.out.print("¿Aceptar la llamada? (s/n): ");
+                    
+                    new Thread(() -> {
+                        try {
+                            Scanner sc = new Scanner(System.in);
+                            String respuesta = sc.nextLine().trim().toLowerCase();
+                            
+                            if (respuesta.equals("s") || respuesta.equals("si")) {
+                                salida.println("@llamada|aceptar|" + parametro);
+                                System.out.println("Llamada aceptada. Conectando...");
+                            } else {
+                                salida.println("@llamada|rechazar|" + parametro);
+                                System.out.println("Llamada rechazada.");
+                            }
+                        } catch (Exception e) {
+                            System.err.println("Error al procesar llamada: " + e.getMessage());
+                        }
+                    }).start();
+                }
+                case "conectar" -> {
+                    String[] datos = parametro.split(":");
+                    if (datos.length == 2) {
+                        String ip = datos[0];
+                        int puerto = Integer.parseInt(datos[1]);
+                        conectarLlamada(ip, puerto);
+                    }
+                }
+                case "rechazada" -> {
+                    System.out.println("Llamada rechazada por: " + parametro);
+                }
+                case "no_disponible" -> {
+                    System.out.println("Usuario no disponible: " + parametro);
+                }
+            }
+        }
     }
 
     // Main
@@ -453,7 +686,6 @@ public class Client {
         System.out.print("Tu nombre de usuario: ");
         String nombre = sc.nextLine();
 
-        // Valores por defecto para evitar problemas con Gradle
         String direccion = "localhost";
         int puerto = 8080;
 

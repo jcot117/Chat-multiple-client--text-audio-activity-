@@ -30,3 +30,11 @@
 [Voz] P -> P
 [P -> P] Mon cheri
 [Voz] P -> P
+[Voz] @config|puerto_llamada|50704 -> Juan
+[@config|puerto_llamada|54337 -> Santiago] Hola
+[@config|puerto_llamada|59073 -> Santiago] Hola
+[@config|puerto_llamada|59093 -> Santiago] a
+[Juan -> Santiago] Hola
+[Voz] Juan -> Santiago
+[Voz] Santiago -> Juan
+[Voz] Juan -> Santiago
