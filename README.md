@@ -1,3 +1,7 @@
+# Paula Andrea Piedrahita
+# Santiago Carlosama Ortiz
+# Jean Carlo Ocampo
+
 # Chat-multiple-client--text-audio-activity-
 # ChatMe
 
